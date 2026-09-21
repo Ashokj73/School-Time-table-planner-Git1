@@ -1,0 +1,21 @@
+{
+  "name": "schoolflow-saas",
+  "version": "1.0.0",
+  "description": "Multi-user SaaS School Timetable Planner with Google ID authorization and cloud persistence",
+  "main": "index.html",
+  "scripts": {
+    "start": "npx serve .",
+    "dev": "npx serve .",
+    "build": "echo 'Vercel build complete'"
+  },
+  "keywords": [
+    "school-timetable",
+    "saas",
+    "google-auth",
+    "timetable-planner",
+    "teacher-cover",
+    "education"
+  ],
+  "author": "SchoolFlow",
+  "license": "MIT"
+}

@@ -1,0 +1,114 @@
+/* Additional setup controls: deliberately kept separate so the core scheduler remains easy to follow. */
+(() => {
+  const oldRender = render;
+  state.admins ??= [];
+  state.tasks ??= [];
+  const teacherPalette = ['#dfeaff','#dff4eb','#fff0d9','#f0e4ff','#ffe2e5','#dff3f5','#fff7c8','#e7e7ff','#e5f0d6','#fbe5d6'];
+  function teacherColour(name) { const teacher=state.teachers.find(t=>t.name===name); if (!teacher) return '#eef1f5'; if (!teacher.colour) teacher.colour=teacherPalette[state.teachers.indexOf(teacher)%teacherPalette.length]; return teacher.colour; }
+  // Preserve the teaching plan, then allocate cover fairly: least daily load first,
+  // followed by least weekly load. Current-session absences are never candidates.
+  schedule = function () {
+    const remaining = Object.fromEntries(state.assignments.map((a,i)=>[i,a.frequency]));
+    const base=[];
+    for (const d of state.days) for (let p=0;p<state.periods.length;p++) {
+      const used=new Set;
+      for (const c of state.classes) {
+        const pick=state.assignments.map((a,i)=>({...a,i,left:remaining[i]})).filter(a=>a.classId===id(c)&&a.left>0&&!used.has(a.teacher)).sort((a,b)=>b.left-a.left)[0];
+        if(pick){used.add(pick.teacher);remaining[pick.i]--;base.push({d,p,c:id(c),s:pick.subject,t:pick.teacher,status:'normal'})}
+        else base.push({d,p,c:id(c),s:'Study / free',t:'—',status:'normal'});
+      }
+    }
+    const daily={}, weekly={}; state.teachers.forEach(t=>{weekly[t.name]=0;state.days.forEach(d=>daily[t.name+'|'+d]=0)});
+    base.filter(x=>x.t!=='—'&&!absent(x.t,x.d,x.p)).forEach(x=>{daily[x.t+'|'+x.d]++;weekly[x.t]++});
+    const occupied={}; state.days.forEach(d=>state.periods.forEach((_,p)=>occupied[d+'|'+p]=new Set(base.filter(x=>x.d===d&&x.p===p&&!absent(x.t,d,p)).map(x=>x.t))));
+    return base.map(x=>{
+      if(x.t==='—'||!absent(x.t,x.d,x.p)) return x;
+      const recovery=name=>state.absences.filter(a=>a.name===name&&a.day===x.d&&a.period!=='all'&&(+a.period)<x.p).length;
+      const cover=state.teachers.filter(t=>!absent(t.name,x.d,x.p)&&!occupied[x.d+'|'+x.p].has(t.name)).sort((a,b)=>Number(subs(b.name).includes(x.s))-Number(subs(a.name).includes(x.s))||(daily[a.name+'|'+x.d]-daily[b.name+'|'+x.d])||(weekly[a.name]-weekly[b.name])||(recovery(b.name)-recovery(a.name))||a.name.localeCompare(b.name))[0];
+      if(!cover)return {...x,t:'Unassigned',status:'uncovered'};
+      occupied[x.d+'|'+x.p].add(cover.name);daily[cover.name+'|'+x.d]++;weekly[cover.name]++;return {...x,t:cover.name,status:'covered'};
+    });
+  };
+  render = function () { oldRender(); decorate(); };
+  const esc = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  function controls(kind, index) { return `<span class="row-actions"><button class="mini" data-action="edit-${kind}" data-index="${index}">Edit</button><button class="mini danger" data-action="delete-${kind}" data-index="${index}">Delete</button></span>`; }
+  function decorate() {
+    state.periods.forEach(p => { if (!p.breakStart) p.breakStart = p.end; if (!p.breakEnd) p.breakEnd = p.end; });
+    document.querySelectorAll('#subjectList span').forEach((el, i) => el.innerHTML = `${esc(state.subjects[i])}${controls('subject', i)}`);
+    document.querySelectorAll('#teacherList .list-row').forEach((el, i) => el.insertAdjacentHTML('beforeend', controls('teacher', i)));
+    document.querySelectorAll('#classList .list-row').forEach((el, i) => el.insertAdjacentHTML('beforeend', controls('class', i)));
+    document.querySelectorAll('#assignmentList .list-row').forEach((el, i) => el.insertAdjacentHTML('beforeend', controls('assignment', i)));
+    document.querySelectorAll('#periodList .period-row').forEach((el, i) => {
+      const p = state.periods[i];
+      el.insertAdjacentHTML('beforeend', `<label class="break-time">Break name<input data-break-name="${i}" value="${esc(p.breakName||'Break')}"></label><label class="break-time">Break start<input data-break="${i}" data-break-field="breakStart" type="time" value="${p.breakStart}"></label><label class="break-time">Break end<input data-break="${i}" data-break-field="breakEnd" type="time" value="${p.breakEnd}"></label><button class="mini danger" data-action="delete-period" data-index="${i}">Delete period</button>`);
+    });
+    document.querySelectorAll('.break-row td').forEach((el, i) => { const p = state.periods.filter(x => x.breakAfter)[i]; if (p) el.textContent = `${p.breakName||'Break'} · ${p.breakStart}–${p.breakEnd}`; });
+    const report=schedule();
+    document.querySelectorAll('#scheduleTable .lesson').forEach((el,i)=>{const lesson=report.filter(x=>x.d===selectedDay)[i];if(lesson&&lesson.t!=='—'&&lesson.t!=='Unassigned'){el.style.background=teacherColour(lesson.t);el.style.borderLeft='4px solid '+teacherColour(lesson.t)}});
+    document.querySelector('#teacherAnalytics').innerHTML=state.teachers.map(t=>{const lessons=report.filter(x=>x.t===t.name).length, covers=report.filter(x=>x.t===t.name&&x.status==='covered').length, absentSessions=state.absences.filter(a=>a.name===t.name).length;return `<div class="list-row"><strong><i class="teacher-swatch" style="background:${teacherColour(t.name)}"></i>${esc(t.name)}</strong><span>${lessons} lessons/week · ${covers} cover · ${absentSessions} absence record${absentSessions===1?'':'s'}</span></div>`}).join('')||'<p class="muted">Add teachers to see analytics.</p>';
+    document.querySelector('#adminList').innerHTML=state.admins.length?state.admins.map((a,i)=>`<div class="list-row"><strong>${esc(a)}</strong><button class="remove" data-admin-remove="${i}">Remove</button></div>`).join(''):'<p class="muted">No administrators added yet.</p>';
+    document.querySelector('#taskAdmin').innerHTML=state.admins.map(a=>`<option>${esc(a)}</option>`).join('')||'<option value="">Add an administrator first</option>';
+    document.querySelector('#taskTeacher').innerHTML=state.teachers.map(t=>`<option>${esc(t.name)}</option>`).join('');
+    document.querySelector('#taskList').innerHTML=state.tasks.length?state.tasks.map((t,i)=>`<div class="coverage ${t.done?'':'bad'}"><div><strong>${esc(t.teacher)} · ${esc(t.title)}</strong><span>Assigned by ${esc(t.admin)}${t.due?' · Due '+esc(t.due.replace('T',' ')):''}</span></div><div><button class="mini" data-task-done="${i}">${t.done?'Reopen':'Complete'}</button><button class="mini danger" data-task-delete="${i}">Delete</button></div></div>`).join(''):'<p class="muted">No tasks assigned.</p>';
+    save();
+  }
+  document.addEventListener('change', e => {
+    if (e.target.dataset.breakName !== undefined) { state.periods[+e.target.dataset.breakName].breakName = e.target.value.trim() || 'Break'; render(); return; }
+    if (!e.target.dataset.break) return;
+    const p = state.periods[+e.target.dataset.break]; p[e.target.dataset.breakField] = e.target.value; render();
+  });
+  document.addEventListener('click', e => {
+    const b = e.target.closest('[data-action]'); if (!b) return;
+    const i = +b.dataset.index, action = b.dataset.action, deleting = action.startsWith('delete-');
+    if (action === 'delete-period') { if (state.periods.length === 1) return alert('A timetable needs at least one period.'); if (!confirm(`Delete ${state.periods[i].label}?`)) return; state.periods.splice(i,1); state.periods.forEach((p,n)=>p.label='Period '+(n+1)); state.absences = state.absences.flatMap(a => { if (a.period === 'all') return [a]; const period = +a.period; if (period === i) return []; return [{...a, period: String(period > i ? period - 1 : period)}]; }); render(); return; }
+    const confirmDelete = label => deleting && confirm(`Delete ${label}? This cannot be undone.`);
+    if (action.endsWith('subject')) { const old = state.subjects[i]; if (deleting) { if (!confirmDelete(old)) return; state.subjects.splice(i,1); state.assignments = state.assignments.filter(a=>a.subject!==old); } else { const v=prompt('Subject name',old)?.trim(); if(v){state.subjects[i]=v;state.assignments.forEach(a=>{if(a.subject===old)a.subject=v})} } }
+    if (action.endsWith('teacher')) { const old=state.teachers[i].name; if(deleting){if(!confirmDelete(old))return;state.teachers.splice(i,1);state.assignments=state.assignments.filter(a=>a.teacher!==old);state.classes.forEach(c=>{if(c.classTeacher===old)c.classTeacher=''})}else{const v=prompt('Teacher name',old)?.trim();if(v){state.teachers[i].name=v;state.assignments.forEach(a=>{if(a.teacher===old)a.teacher=v});state.classes.forEach(c=>{if(c.classTeacher===old)c.classTeacher=v});state.absences.forEach(a=>{if(a.name===old)a.name=v})}} }
+    if (action.endsWith('class')) { const c=state.classes[i], old=c.name+'-'+c.section; if(deleting){if(!confirmDelete(old))return;state.classes.splice(i,1);state.assignments=state.assignments.filter(a=>a.classId!==old)}else{const n=prompt('Class name',c.name)?.trim(),s=prompt('Section',c.section)?.trim(),t=prompt('Class teacher',c.classTeacher)?.trim();if(n&&s){c.name=n;c.section=s;c.classTeacher=t||'';state.assignments.forEach(a=>{if(a.classId===old)a.classId=n+'-'+s})}} }
+    if (action.endsWith('assignment')) { const a=state.assignments[i]; if(deleting){if(!confirmDelete(`${a.classId} ${a.subject}`))return;state.assignments.splice(i,1)}else{const t=prompt('Teacher',a.teacher)?.trim(),s=prompt('Subject',a.subject)?.trim(),f=prompt('Lessons per week (1–10)',a.frequency);if(t&&s&&f){a.teacher=t;a.subject=s;a.frequency=Math.max(1,Math.min(10,+f||a.frequency))}} }
+    render();
+  });
+  document.querySelector('#downloadBtn').onclick=()=>{const rows=[['Day','Period','Time','Class / section','Subject','Teacher','Status'],...schedule().map(x=>[x.d,state.periods[x.p].label,`${state.periods[x.p].start}-${state.periods[x.p].end}`,x.c,x.s,x.t,x.status])];const csv=rows.map(r=>r.map(v=>`"${String(v).replaceAll('"','""')}"`).join(',')).join('\n');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='schoolflow-timetable.csv';a.click();URL.revokeObjectURL(a.href)};
+  document.querySelector('#shareBtn').onclick=async()=>{const text='SchoolFlow timetable: '+state.days.join(', ')+' · '+state.periods.length+' periods/day.';try{if(navigator.share)await navigator.share({title:'SchoolFlow timetable',text});else{await navigator.clipboard.writeText(text);alert('Timetable summary copied. You can paste it into email or WhatsApp.')}}catch(e){/* sharing was cancelled */}};
+  function exportTable(day) {
+    const list=schedule().filter(x=>!day||x.d===day);
+    const heading=day ? `${day} timetable` : 'Consolidated weekly timetable';
+    return '<!doctype html><html><head><meta charset="utf-8"><style>table{border-collapse:collapse;font-family:Arial}th,td{border:1px solid #777;padding:7px;text-align:left}th{background:#dde7f7}</style></head><body><h2>'+esc(heading)+'</h2><table><tr><th>Day</th><th>Period</th><th>Time</th><th>Class / section</th><th>Subject</th><th>Teacher</th><th>Status</th></tr>'+list.map(x=>'<tr><td>'+esc(x.d)+'</td><td>'+esc(state.periods[x.p].label)+'</td><td>'+esc(state.periods[x.p].start+'–'+state.periods[x.p].end)+'</td><td>'+esc(x.c)+'</td><td>'+esc(x.s)+'</td><td>'+esc(x.t)+'</td><td>'+esc(x.status)+'</td></tr>').join('')+'</table></body></html>';
+  }
+  function matrixTable(day) {
+    const oneDay = d => { const plan=schedule(); return '<section class="page"><h2>'+esc(d)+' timetable</h2><table><thead><tr><th class="period-head">Period / time</th>'+state.classes.map(c=>'<th>'+esc(c.name+' '+c.section)+'</th>').join('')+'</tr></thead><tbody>'+state.periods.map((p,i)=>{const lessons=state.classes.map(c=>{const x=plan.find(v=>v.d===d&&v.p===i&&v.c===id(c)), colour=teacherColour(x.t);return '<td bgcolor="'+colour+'" style="background-color:'+colour+';border-left:12px solid '+colour+'"><div class="lesson-card" style="background-color:'+colour+';border-left:5px solid '+colour+'"><b>'+esc(x.s)+'</b><span><i style="display:inline-block;width:9px;height:9px;background-color:'+colour+';border:1px solid #345;vertical-align:middle;margin-right:4px"></i>'+esc(x.t)+'</span></div></td>'}).join('');const period='<tr><td class="period-cell"><b>'+esc(p.label)+'</b><span>'+esc(p.start+'–'+p.end)+'</span></td>'+lessons+'</tr>';const br=p.breakAfter?'<tr class="break"><td colspan="'+(state.classes.length+1)+'">'+esc(p.breakName||'Break')+' · '+esc(p.breakStart+'–'+p.breakEnd)+'</td></tr>':'';return period+br}).join('')+'</tbody></table></section>';};
+    return '<!doctype html><html><head><meta charset="utf-8"><style>@page{size:landscape;margin:10mm}*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}body{font-family:Arial;color:#102442;margin:0}.page{page-break-after:always;margin-bottom:24px}h2{font-size:18px;margin:0 0 12px}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #d9dfeb;padding:10px;text-align:left;vertical-align:top}th{background:#fafbff;font-size:13px}.period-head{width:110px}.period-cell b,.period-cell span,.lesson-card b,.lesson-card span{display:block}.period-cell span,.lesson-card span{font-size:12px;margin-top:6px;color:#36517a}.lesson-card{border-radius:9px;padding:12px;min-height:62px}.break td{background:#fff0dd;color:#8b5d23;font-size:12px;font-weight:bold;padding:8px 12px}@media print{.page:last-child{page-break-after:auto}}</style></head><body>'+ (day?[day]:state.days).map(oneDay).join('')+'</body></html>';
+  }
+  function matrixTable(day) { const one=d=>{const plan=schedule();return '<section class="page"><h2>'+esc(d)+' timetable</h2><table><thead><tr><th>Period / time</th>'+state.classes.map(c=>'<th>'+esc(c.name+' '+c.section)+'</th>').join('')+'</tr></thead><tbody>'+state.periods.map((p,i)=>{const cells=state.classes.map(c=>{const x=plan.find(v=>v.d===d&&v.p===i&&v.c===id(c)),colour=teacherColour(x.t),note=x.status==='covered'?'Cover assigned':x.status==='uncovered'?'Cover required':'';return '<td style="border-left:10px solid '+colour+'"><div class="lesson-card" style="background-color:'+colour+'"><b>'+esc(x.s)+'</b><span>'+esc(x.t)+'</span>'+(note?'<em>'+note+'</em>':'')+'</div></td>'}).join('');return '<tr><td class="period-cell"><b>'+esc(p.label)+'</b><span>'+esc(p.start+'–'+p.end)+'</span></td>'+cells+'</tr>'+(p.breakAfter?'<tr class="break"><td colspan="'+(state.classes.length+1)+'">'+esc(p.breakName||'Break')+' · '+esc(p.breakStart+'–'+p.breakEnd)+'</td></tr>':'')}).join('')+'</tbody></table></section>'};return '<!doctype html><html><head><meta charset="utf-8"><style>@page{size:landscape;margin:10mm}*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}body{font-family:Arial;color:#102442}.page{page-break-after:always}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #d9dfeb;padding:9px;vertical-align:top;text-align:left}th{background:#fafbff}.period-cell b,.period-cell span,.lesson-card b,.lesson-card span,.lesson-card em{display:block}.period-cell span,.lesson-card span{font-size:12px;margin-top:5px;color:#36517a}.lesson-card{padding:10px;min-height:56px;border-radius:7px}.lesson-card em{font-size:10px;font-style:normal;font-weight:bold;margin-top:7px;color:#137154}.break td{background:#fff0dd;color:#8b5d23;font-weight:bold}@media print{.page:last-child{page-break-after:auto}}</style></head><body>'+(day?[day]:state.days).map(one).join('')+'</body></html>' }
+  function excel(day) { const a=document.createElement('a'), label=day ? day.toLowerCase() : 'weekly'; a.href=URL.createObjectURL(new Blob([matrixTable(day)],{type:'application/vnd.ms-excel'}));a.download='schoolflow-'+label+'-timetable.xls';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),500); }
+  function printGrid(day) { const win=window.open('','_blank'); if(!win)return alert('Please allow pop-ups to print the timetable.'); win.document.write(matrixTable(day));win.document.close();win.focus();setTimeout(()=>win.print(),250); }
+  document.querySelector('#dayExcelBtn').onclick=()=>excel(selectedDay);
+  document.querySelector('#weekExcelBtn').onclick=()=>excel(null);
+  document.querySelector('#dayPrintBtn').onclick=()=>printGrid(selectedDay);
+  document.querySelector('#weekPrintBtn').onclick=()=>printGrid(null);
+  async function localWorkbookRows(file) {
+    if (!file.name.toLowerCase().endsWith('.xlsx')) throw new Error('Use an .xlsx workbook (Excel: Save As > Excel Workbook).');
+    const bytes=new Uint8Array(await file.arrayBuffer()), view=new DataView(bytes.buffer), text=new TextDecoder(); let end=-1;
+    for(let i=bytes.length-22;i>=Math.max(0,bytes.length-66000);i--)if(view.getUint32(i,true)===0x06054b50){end=i;break} if(end<0)throw new Error('Invalid .xlsx file.');
+    const total=view.getUint16(end+10,true), cd=view.getUint32(end+16,true); const entries={}; let at=cd;
+    for(let n=0;n<total;n++){if(view.getUint32(at,true)!==0x02014b50)break;const method=view.getUint16(at+10,true),size=view.getUint32(at+20,true),nameLen=view.getUint16(at+28,true),extra=view.getUint16(at+30,true),comment=view.getUint16(at+32,true),offset=view.getUint32(at+42,true),name=text.decode(bytes.slice(at+46,at+46+nameLen));entries[name]={method,size,offset};at+=46+nameLen+extra+comment}
+    const get=async name=>{const e=entries[name];if(!e)return '';const n=view.getUint16(e.offset+26,true),x=view.getUint16(e.offset+28,true),data=bytes.slice(e.offset+30+n+x,e.offset+30+n+x+e.size);if(e.method===0)return text.decode(data);if(e.method===8)return await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).text();throw new Error('Unsupported Excel compression.');};
+    const xml=s=>new DOMParser().parseFromString(s,'application/xml'), cellText=node=>node?node.textContent.replace(/\s+/g,' ').trim():'';const shared=[...xml(await get('xl/sharedStrings.xml')).querySelectorAll('si')].map(cellText), wb=xml(await get('xl/workbook.xml')), rel=await get('xl/_rels/workbook.xml.rels');const targets={};[...rel.matchAll(/<Relationship[^>]*Id="([^"]+)"[^>]*Target="([^"]+)"/g)].forEach(m=>targets[m[1]]='xl/'+m[2].replace(/^\//,''));const out={};
+    for(const sh of wb.querySelectorAll('sheet')){const name=sh.getAttribute('name'),rid=sh.getAttribute('r:id'),sheet=xml(await get(targets[rid]));const grid={};sheet.querySelectorAll('row').forEach(row=>row.querySelectorAll('c').forEach(c=>{const ref=c.getAttribute('r'),col=ref.replace(/\d/g,''),r=+ref.replace(/\D/g,'');let v=cellText(c.querySelector('v'));if(c.getAttribute('t')==='s')v=shared[+v]||'';if(c.getAttribute('t')==='inlineStr')v=cellText(c.querySelector('is'));(grid[r]??={})[col]=v}));const nums=Object.keys(grid).map(Number).sort((a,b)=>a-b),cols=Object.keys(grid[nums[0]]||{}).sort((a,b)=>a.localeCompare(b));const headers=cols.map(c=>grid[nums[0]][c]);out.__raw??={};out.__raw[name]=grid;out[name]=nums.slice(1).map(r=>Object.fromEntries(cols.map((c,i)=>[headers[i],grid[r][c]||''])))} return out;
+  }
+  const readUpload=async(file,mode)=>{
+    if(!file)return;
+    try{const all=await localWorkbookRows(file), rows=name=>all[name]||[], value=(r,...keys)=>{const k=Object.keys(r).find(x=>keys.includes(x.toLowerCase().replace(/[^a-z]/g,'')));return k?String(r[k]).trim():''};let n=0;
+      if(mode==='people') { rows('Teachers').forEach(r=>{const name=value(r,'teacher','teachers','teachername','name');if(name&&!state.teachers.some(t=>t.name===name)){state.teachers.push({name});n++}});rows('Subjects').forEach(r=>{const s=value(r,'subject','subjects','subjectname','name');if(s&&!state.subjects.includes(s)){state.subjects.push(s);n++}});alert(`Imported ${n} teacher/subject records.`); }
+      else { const add=(teacher,name,section,subject,frequency)=>{if(!teacher||!name||!section||!subject)return;if(!state.teachers.some(t=>t.name===teacher))state.teachers.push({name:teacher});if(!state.subjects.includes(subject))state.subjects.push(subject);let c=state.classes.find(x=>x.name===name&&x.section===section);if(!c){c={name,section,classTeacher:''};state.classes.push(c)}const old=state.assignments.find(a=>a.teacher===teacher&&a.classId===id(c)&&a.subject===subject);if(old)old.frequency=frequency;else{state.assignments.push({teacher,classId:id(c),subject,frequency});n++}}; const direct=rows('Assignments');if(direct.length)direct.forEach(r=>add(value(r,'teacher','teachername'),value(r,'class','classname','grade'),value(r,'section'),value(r,'subject'),Math.max(1,Math.min(10,+value(r,'frequency','lessonsperweek','weeklyfrequency')||1))));else{const g=all.__raw?.Sheet1;if(!g)throw new Error('Assignment sheet not found');const cols=[...new Set(Object.values(g).flatMap(r=>Object.keys(r)))].sort((a,b)=>{const n=s=>[...s].reduce((v,c)=>v*26+c.charCodeAt(0)-64,0);return n(a)-n(b)}),last=Math.max(...Object.keys(g).map(Number));for(let r=5;r<=last;r++){const teacher=g[r]?.A;if(!teacher)continue;let group='';for(const col of cols){if(g[2]?.[col])group=g[2][col];const subject=g[3]?.[col],freq=+g[r]?.[col];if(group&&subject&&freq>0){const cut=group.lastIndexOf('-'),name=cut>0?group.slice(0,cut):group,section=cut>0?group.slice(cut+1):'A';add(teacher,name,section,subject,Math.round(freq))}}}}alert(`Imported ${n} teaching assignments.`); }render();
+    }catch(err){alert('Could not read the file. Check the specified sheet name and column headings.')} };
+  document.querySelector('#teacherSubjectUploadBtn').onclick=()=>document.querySelector('#teacherSubjectUpload').click();
+  document.querySelector('#teacherSubjectUpload').onchange=e=>{readUpload(e.target.files[0],'people');e.target.value=''};
+  document.querySelector('#assignmentUploadBtn').onclick=()=>document.querySelector('#assignmentUpload').click();
+  document.querySelector('#assignmentUpload').onchange=e=>{readUpload(e.target.files[0],'assignments');e.target.value=''};
+  document.querySelector('#adminForm').onsubmit=e=>{e.preventDefault();const name=document.querySelector('#adminName').value.trim();if(name&&!state.admins.includes(name))state.admins.push(name);e.target.reset();render();};
+  document.querySelector('#adminList').onclick=e=>{const i=e.target.dataset.adminRemove;if(i!==undefined){state.admins.splice(+i,1);render();}};
+  document.querySelector('#taskForm').onsubmit=e=>{e.preventDefault();const admin=document.querySelector('#taskAdmin').value,teacher=document.querySelector('#taskTeacher').value,title=document.querySelector('#taskTitle').value.trim(),due=document.querySelector('#taskDue').value;if(!admin)return alert('Add an administrator before assigning tasks.');if(title)state.tasks.unshift({admin,teacher,title,due,done:false});e.target.reset();render();};
+  document.querySelector('#taskList').onclick=e=>{if(e.target.dataset.taskDone!==undefined){const t=state.tasks[+e.target.dataset.taskDone];t.done=!t.done;render();}if(e.target.dataset.taskDelete!==undefined){state.tasks.splice(+e.target.dataset.taskDelete,1);render();}};
+  render();
+})();

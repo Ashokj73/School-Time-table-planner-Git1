@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SchoolFlow — Dynamic Timetable</title>
+  <link rel="stylesheet" href="styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div><p class="eyebrow">SCHOOL OPERATIONS</p><h1>SchoolFlow</h1><p class="subtitle">Build a timetable around your school—not a fixed template.</p></div>
+      <div class="date"><span>Today</span><strong id="today"></strong></div>
+    </header>
+
+    <section class="summary" aria-label="Daily summary">
+      <article><span>Scheduled lessons</span><strong id="lessonCount">0</strong></article>
+      <article><span>Teachers available</span><strong id="availableCount">0</strong></article>
+      <article class="alert"><span>Lessons needing cover</span><strong id="coverCount">0</strong></article>
+      <article><span>Coverage rate</span><strong id="coverageRate">100%</strong></article>
+    </section>
+
+    <section class="toolbar">
+      <div class="tabs" role="tablist"><button class="active" data-view="timetable">Timetable</button><button data-view="absences">Absence desk</button><button data-view="setup">School setup</button><button data-view="adminTasks">Admin tasks</button></div>
+      <div class="actions"><button class="secondary" id="downloadBtn">Download timetable</button><button class="secondary" id="shareBtn">Share</button><button class="secondary" id="resetBtn">Reset demo</button><button class="primary" id="rescheduleBtn">Build weekly timetable</button></div>
+    </section>
+
+    <section id="timetable" class="view active">
+      <div class="panel-heading"><div><h2 id="scheduleTitle">Weekly timetable</h2><p>Choose a teaching day. Breaks and cover decisions appear directly in the schedule.</p></div><div class="legend"><i class="normal"></i> Normal <i class="covered"></i> Covered <i class="uncovered"></i> Needs action</div></div>
+      <div id="dayPicker" class="day-picker"></div>
+      <div class="export-grid" aria-label="Timetable exports"><button class="secondary" id="dayExcelBtn">Day-wise Excel</button><button class="secondary" id="weekExcelBtn">Weekly Excel</button><button class="secondary" id="dayPrintBtn">Print day / Save PDF</button><button class="secondary" id="weekPrintBtn">Print week / Save PDF</button></div>
+      <div class="timetable-wrap"><table id="scheduleTable"></table></div>
+      <article class="card analytics"><h2>Teacher workload analytics</h2><p>Lessons are counted across the configured week. Cover allocation favors the lowest daily load, then the lowest weekly load.</p><div id="teacherAnalytics"></div></article>
+    </section>
+
+    <section id="absences" class="view">
+      <div class="two-col">
+        <article class="card"><h2>Record an absence</h2><p>Mark a teacher absent and the timetable immediately finds the best available cover teacher.</p>
+          <form id="absenceForm"><label>Teacher<select id="teacherSelect"></select></label><label>Day<select id="absenceDay"></select></label><label>Periods affected<select id="periodSelect"></select></label><button class="primary" type="submit">Record & reschedule</button></form>
+        </article>
+        <article class="card"><h2>Today’s absences</h2><div id="absenceList" class="absence-list"></div></article>
+      </div>
+      <article class="card recommendations"><h2>Coverage decisions</h2><p>Assignments favor matching subject expertise first, then teachers with the lightest teaching load.</p><div id="coverageList"></div></article>
+    </section>
+
+    <section id="setup" class="view">
+      <div class="two-col">
+        <article class="card"><h2>School week & periods</h2><p>Select teaching days. Add up to ten periods, give each a time slot, and insert a break after any period.</p><div id="dayChoices" class="checks"></div><div id="periodList"></div><button id="addPeriod" class="secondary">Add period</button></article>
+        <article class="card"><h2>Teachers & subjects</h2><p>Enter subjects offered, then add teachers. Subject expertise can be refined through assignments below.</p><div id="subjectList" class="chips"></div><form id="subjectForm" class="inline-form small"><input id="subjectName" required placeholder="New subject" /><button class="secondary">Add subject</button></form><div id="teacherList"></div><form id="teacherForm" class="inline-form"><input id="teacherName" required placeholder="Teacher name" /><button class="secondary">Add teacher</button></form><div class="import-box"><strong>Import teachers & subjects</strong><span>Excel sheets: <em>Teachers</em> with a Teacher column; <em>Subjects</em> with a Subject column.</span><input id="teacherSubjectUpload" type="file" accept=".xlsx,.xls,.csv" hidden><button class="secondary" id="teacherSubjectUploadBtn">Upload teachers / subjects</button></div></article>
+      </div>
+      <div class="two-col lower"><article class="card"><h2>Classes & sections</h2><p>Create each class section and assign its class teacher.</p><div id="classList"></div><form id="classForm" class="inline-form"><input id="className" required placeholder="Class, e.g. Grade 7" /><input id="sectionName" required placeholder="Section, e.g. A" /><select id="classTeacher"></select><button class="secondary">Add section</button></form></article><article class="card"><h2>Teaching assignments</h2><p>Assign a subject to a teacher for a section and set lessons per week.</p><div id="assignmentList"></div><form id="assignmentForm" class="assignment-form"><select id="assignmentTeacher"></select><select id="assignmentClass"></select><select id="assignmentSubject"></select><input id="assignmentFrequency" type="number" min="1" max="10" value="4" /><button class="secondary">Assign</button></form><div class="import-box"><strong>Import teaching assignments</strong><span>Excel sheet: <em>Assignments</em>. Columns: Teacher, Class, Section, Subject, Frequency.</span><input id="assignmentUpload" type="file" accept=".xlsx,.xls,.csv" hidden><button class="secondary" id="assignmentUploadBtn">Upload assignments</button></div></article></div>
+      <article class="card rules"><h2>Scheduling logic</h2><ul><li>One teacher can teach only one section in a period.</li><li>Each assignment's weekly frequency is distributed across the selected teaching days.</li><li>Subject-qualified teachers are preferred for emergency cover.</li><li>When no cover is available, the lesson is clearly marked for the administrator.</li></ul></article>
+    </section>
+    <section id="adminTasks" class="view"><div class="two-col"><article class="card"><h2>Administrators</h2><p>Add the in-charge staff members who can create and manage teacher tasks.</p><div id="adminList"></div><form id="adminForm" class="inline-form"><input id="adminName" required placeholder="Administrator name" /><button class="secondary">Add admin</button></form></article><article class="card"><h2>Assign a task</h2><p>Give any teacher an operational, cover, meeting, or follow-up task.</p><form id="taskForm"><label>Assigned by<select id="taskAdmin"></select></label><label>Teacher<select id="taskTeacher"></select></label><label>Task<input id="taskTitle" required placeholder="e.g. Cover Grade 8-A, Period 4" /></label><label>Due date & time<input id="taskDue" type="datetime-local" /></label><button class="primary">Assign task</button></form></article></div><article class="card recommendations"><h2>Assigned tasks</h2><div id="taskList"></div></article></section>
+  </main>
+  <template id="emptyAbsence"><p class="muted">No absences recorded. The original timetable is in effect.</p></template>
+  <script src="app.js"></script>
+  <script src="enhancements.js"></script>
+</body>
+</html>

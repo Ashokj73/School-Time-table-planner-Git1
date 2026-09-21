@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SchoolFlow SaaS — Multi-User Timetable & Staff Cover Platform</title>
+  
+  <!-- CSS Stylesheet -->
+  <link rel="stylesheet" href="css/styles.css" />
+  
+  <!-- Google Identity Services (GIS) for Google ID Authorization -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  
+  <!-- SheetJS for Excel and CSV File Import -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+  <div class="saas-shell">
+    
+    <!-- Top Application Header -->
+    <header class="saas-header">
+      <div class="brand-section">
+        <div class="brand-logo">SF</div>
+        <div class="brand-info">
+          <h1>SchoolFlow <span class="saas-pill">SaaS Cloud</span></h1>
+          <p>Intelligent timetable scheduling & automated staff absence cover</p>
+        </div>
+      </div>
+
+      <!-- Workspace & Multi-Timetable Controls -->
+      <div class="workspace-controls">
+        <div class="timetable-selector-box">
+          <label for="timetableSelect">Timetable:</label>
+          <select id="timetableSelect" class="timetable-dropdown" title="Select active timetable"></select>
+          <button class="mini secondary" id="manageTimetablesBtn" title="Manage all timetables in this account">Manage</button>
+        </div>
+
+        <!-- Cloud Sync Badge -->
+        <div id="cloudSyncBadge" class="cloud-sync-badge synced">
+          <span class="sync-dot"></span>
+          <span id="cloudSyncText">All changes saved to Cloud</span>
+        </div>
+
+        <!-- User Identity & Google Account Widget -->
+        <div id="userAccountWidget" class="user-account-widget" title="Click to view Google Account & Settings">
+          <img id="userAvatar" class="user-avatar" src="" alt="User profile" />
+          <div class="user-details">
+            <span id="userName" class="user-name">Loading...</span>
+            <span id="userSchool" class="user-school">School Workspace</span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Operational Metrics Summary Bar -->
+    <section class="metrics-grid" aria-label="Operational metrics">
+      <article class="metric-card">
+        <span>Scheduled Lessons</span>
+        <strong id="lessonCount">0</strong>
+      </article>
+      <article class="metric-card">
+        <span>Teachers Available</span>
+        <strong id="availableCount">0</strong>
+      </article>
+      <article class="metric-card alert">
+        <span>Lessons Needing Cover</span>
+        <strong id="coverCount">0</strong>
+      </article>
+      <article class="metric-card success">
+        <span>Coverage Rate</span>
+        <strong id="coverageRate">100%</strong>
+      </article>
+    </section>
+
+    <!-- Toolbar: View Tabs & Global Actions -->
+    <section class="toolbar-container">
+      <nav class="nav-tabs" role="tablist">
+        <button class="active" data-view="timetable">📅 Timetable Matrix</button>
+        <button data-view="absences">🚨 Absence & Cover Desk</button>
+        <button data-view="setup">⚙️ School Setup</button>
+        <button data-view="adminTasks">📋 Staff Tasks</button>
+      </nav>
+
+      <div class="action-buttons">
+        <button class="secondary" id="saveSnapshotBtn">💾 Save Snapshot</button>
+        <button class="secondary" id="downloadBtn">📥 Export CSV</button>
+        <button class="secondary" id="shareBtn">🔗 Share</button>
+        <button class="primary" id="rescheduleBtn">⚡ Rebuild Schedule</button>
+      </div>
+    </section>
+
+    <!-- TAB 1: Timetable Matrix View -->
+    <section id="timetable" class="view active">
+      <div class="panel-heading">
+        <div>
+          <h2 id="scheduleTitle">Weekly Timetable</h2>
+          <p class="desc">Select a teaching day to inspect scheduled lessons, custom break periods, and automated cover allocations.</p>
+        </div>
+        <div class="legend">
+          <span><i class="normal"></i> Scheduled</span>
+          <span><i class="covered"></i> Cover Assigned</span>
+          <span><i class="uncovered"></i> Needs Action</span>
+        </div>
+      </div>
+
+      <div id="dayPicker" class="day-picker"></div>
+
+      <div class="export-grid" aria-label="Timetable export options">
+        <button class="secondary" id="dayExcelBtn">📊 Day-wise Excel</button>
+        <button class="secondary" id="weekExcelBtn">📑 Weekly Master Excel</button>
+        <button class="secondary" id="dayPrintBtn">🖨️ Print Day / PDF</button>
+        <button class="secondary" id="weekPrintBtn">🖨️ Print Week / PDF</button>
+      </div>
+
+      <div class="timetable-wrap">
+        <table id="scheduleTable"></table>
+      </div>
+
+      <article class="card">
+        <h2>Teacher Workload Analytics</h2>
+        <p class="desc">Monitors lesson distribution, cover duties, and absence frequencies to ensure equitable staff allocation across the academic term.</p>
+        <div id="teacherAnalytics"></div>
+      </article>
+    </section>
+
+    <!-- TAB 2: Absence & Cover Desk View -->
+    <section id="absences" class="view">
+      <div class="two-col">
+        <article class="card">
+          <h2>Record Staff Absence</h2>
+          <p class="desc">Log a planned or emergency absence. The system re-allocates duties dynamically prioritizing subject match and lightest load.</p>
+          <form id="absenceForm">
+            <label>
+              Staff Member
+              <select id="teacherSelect"></select>
+            </label>
+            <label>
+              Absence Day
+              <select id="absenceDay"></select>
+            </label>
+            <label>
+              Periods Affected
+              <select id="periodSelect"></select>
+            </label>
+            <button class="primary" type="submit">Record Absence & Re-allocate</button>
+          </form>
+        </article>
+
+        <article class="card">
+          <h2>Recorded Absences</h2>
+          <p class="desc">Current registered staff absences for this timetable schedule.</p>
+          <div id="absenceList"></div>
+        </article>
+      </div>
+
+      <article class="card" style="margin-top: 20px;">
+        <h2>Smart Cover Decisions & Audit Log</h2>
+        <p class="desc">Live cover assignments determined by algorithmic fairness and qualification matching.</p>
+        <div id="coverageList"></div>
+      </article>
+    </section>
+
+    <!-- TAB 3: School Setup View -->
+    <section id="setup" class="view">
+      <div class="two-col">
+        <!-- Teaching Days & Periods -->
+        <article class="card">
+          <h2>School Week & Periods</h2>
+          <p class="desc">Configure active instructional days, daily period slots, and scheduled break intervals.</p>
+          
+          <label style="margin-bottom:8px;font-weight:600;">Teaching Days:</label>
+          <div id="dayChoices" class="checks"></div>
+          
+          <label style="margin-top:16px;margin-bottom:8px;font-weight:600;">Daily Bell Schedule:</label>
+          <div id="periodList"></div>
+          <button id="addPeriod" class="secondary" style="margin-top: 8px;">+ Add Period</button>
+        </article>
+
+        <!-- Teachers & Subjects -->
+        <article class="card">
+          <h2>Teachers & Subject Registry</h2>
+          <p class="desc">Manage teaching faculty and curriculum offerings.</p>
+          
+          <label style="margin-bottom:6px;font-weight:600;">Curriculum Subjects:</label>
+          <div id="subjectList" class="chips"></div>
+          <form id="subjectForm" class="inline-form">
+            <input id="subjectName" required placeholder="New subject (e.g. Physics)" />
+            <button class="secondary" type="submit">Add Subject</button>
+          </form>
+
+          <label style="margin-top:16px;margin-bottom:6px;font-weight:600;">Faculty Roster:</label>
+          <div id="teacherList"></div>
+          <form id="teacherForm" class="inline-form">
+            <input id="teacherName" required placeholder="Teacher name (e.g. Dr. Jane Goodall)" />
+            <button class="secondary" type="submit">Add Teacher</button>
+          </form>
+
+          <div class="import-box">
+            <strong>📁 Import Teachers & Subjects</strong>
+            <span>Upload Excel (.xlsx, .xls) or .csv. Sheets: <em>Teachers</em> with Teacher column; <em>Subjects</em> with Subject column.</span>
+            <input id="teacherSubjectUpload" type="file" accept=".xlsx,.xls,.csv" hidden />
+            <button class="secondary" id="teacherSubjectUploadBtn" type="button">Upload Teachers & Subjects</button>
+          </div>
+        </article>
+      </div>
+
+      <div class="two-col" style="margin-top: 20px;">
+        <!-- Classes & Sections -->
+        <article class="card">
+          <h2>Classes & Sections</h2>
+          <p class="desc">Define student cohorts and class supervisors.</p>
+          <div id="classList"></div>
+          <form id="classForm" style="margin-top: 16px;">
+            <div style="display:flex;gap:8px;">
+              <input id="className" required placeholder="Grade / Level (e.g. Grade 9)" />
+              <input id="sectionName" required placeholder="Section (e.g. A)" style="width:100px;" />
+            </div>
+            <label style="margin-top: 8px;">
+              Class Teacher
+              <select id="classTeacher"></select>
+            </label>
+            <button class="secondary" type="submit" style="width:100%;margin-top:4px;">Add Class</button>
+          </form>
+        </article>
+
+        <!-- Teaching Assignments -->
+        <article class="card">
+          <h2>Curriculum Assignments & Quotas</h2>
+          <p class="desc">Specify how many times each subject is taught per week to each class and by whom.</p>
+          <div id="assignmentList" style="max-height: 260px; overflow-y: auto;"></div>
+          <form id="assignmentForm" style="margin-top: 16px;">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+              <label>Class<select id="assignmentClass"></select></label>
+              <label>Subject<select id="assignmentSubject"></select></label>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+              <label>Teacher<select id="assignmentTeacher"></select></label>
+              <label>Lessons / Week<input id="assignmentFrequency" type="number" min="1" max="10" value="4" required /></label>
+            </div>
+            <button class="primary" type="submit" style="width:100%;margin-top:8px;">Add Assignment</button>
+          </form>
+
+          <div class="import-box">
+            <strong>📁 Import Teaching Assignments</strong>
+            <span>Upload Excel (.xlsx, .xls) or .csv with <em>Assignments</em> sheet (Columns: Teacher, Class, Section, Subject, Frequency).</span>
+            <input id="assignmentUpload" type="file" accept=".xlsx,.xls,.csv" hidden />
+            <button class="secondary" id="assignmentUploadBtn" type="button">Upload Assignments</button>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- TAB 4: Staff Tasks & Admin Desk -->
+    <section id="adminTasks" class="view">
+      <div class="two-col">
+        <article class="card">
+          <h2>Assign Administrative Task</h2>
+          <p class="desc">Delegate duty tasks, detention monitoring, or meeting actions to staff.</p>
+          <form id="taskForm">
+            <label>Assigning Administrator<select id="taskAdmin"></select></label>
+            <label>Assigned Staff Member<select id="taskTeacher"></select></label>
+            <label>Task Title<input id="taskTitle" required placeholder="e.g. Playground Supervision / Exam Moderation" /></label>
+            <label>Due Date & Time<input id="taskDue" type="datetime-local" /></label>
+            <button class="primary" type="submit" style="margin-top: 8px;">Assign Task</button>
+          </form>
+        </article>
+
+        <article class="card">
+          <h2>School Administrators</h2>
+          <p class="desc">Authorized users permitted to create assignments and schedule cover.</p>
+          <div id="adminList"></div>
+          <form id="adminForm" class="inline-form">
+            <input id="adminName" required placeholder="Administrator name" />
+            <button class="secondary" type="submit">Add Administrator</button>
+          </form>
+        </article>
+      </div>
+
+      <article class="card" style="margin-top: 20px;">
+        <h2>Delegated Staff Tasks</h2>
+        <div id="taskList"></div>
+      </article>
+    </section>
+
+  </div><!-- end saas-shell -->
+
+  <!-- ======================================================================
+       MODAL 1: Timetable Manager (Create, Switch, Rename, Delete)
+       ====================================================================== -->
+  <div id="timetableModal" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Timetable Workspace Manager</h3>
+        <button class="modal-close">&times;</button>
+      </div>
+      
+      <p style="font-size:13px;color:var(--neutral-500);margin-bottom:14px;">
+        Each individual account can maintain multiple independent timetables (e.g. terms, exam schedules, trial sessions).
+      </p>
+
+      <div id="timetableListContainer" style="margin-bottom: 20px;"></div>
+
+      <div style="border-top:1px solid var(--neutral-200);padding-top:16px;">
+        <h4 style="font-size:14px;margin-bottom:10px;">Create New Timetable</h4>
+        <form id="newTimetableForm">
+          <label>
+            Timetable Name
+            <input id="newTimetableTitle" required placeholder="e.g. Term 2 - 2026/27" />
+          </label>
+          <label>
+            Academic Year
+            <input id="newTimetableYear" value="2026-2027" />
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;margin-bottom:14px;">
+            <input type="checkbox" id="cloneCurrentCheckbox" checked />
+            Clone setup & teachers from current active timetable
+          </label>
+          <button class="primary" type="submit" style="width:100%;">Create Timetable</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================================================================
+       MODAL 2: User Account & Google ID Authorization Hub
+       ====================================================================== -->
+  <div id="accountModal" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Account & Google ID Authorization</h3>
+        <button class="modal-close">&times;</button>
+      </div>
+
+      <!-- Active User Profile Display -->
+      <div style="display:flex;align-items:center;gap:14px;padding:12px;background:var(--neutral-100);border-radius:10px;margin-bottom:16px;">
+        <img id="modalUserAvatar" style="width:52px;height:52px;border-radius:50%;object-fit:cover;" src="" alt="" />
+        <div>
+          <strong id="modalUserName" style="font-size:16px;display:block;">User Name</strong>
+          <span id="modalUserEmail" style="font-size:13px;color:var(--neutral-600);display:block;">email@domain.com</span>
+          <span id="modalUserRole" style="font-size:12px;color:var(--primary);font-weight:600;">Administrator</span>
+        </div>
+      </div>
+
+      <!-- Google Identity Sign-In Button Container -->
+      <div style="margin: 16px 0; text-align: center;">
+        <div id="gsiButtonContainer" style="display:inline-block;"></div>
+      </div>
+
+      <!-- Multi-User Isolation Tester / Persona Switcher -->
+      <div style="border-top:1px solid var(--neutral-200);padding-top:14px;margin-top:14px;">
+        <h4 style="font-size:14px;margin-bottom:6px;">Multi-User Account Switcher (Sandbox Demo)</h4>
+        <p style="font-size:12px;color:var(--neutral-500);margin-bottom:10px;">
+          Select a persona below to verify that each individual has their own isolated timetables and saved inputs/outputs.
+        </p>
+        <div id="personaList" class="persona-picker"></div>
+      </div>
+
+      <!-- Live Google Cloud OAuth Configuration Form -->
+      <div style="border-top:1px solid var(--neutral-200);padding-top:14px;margin-top:14px;">
+        <h4 style="font-size:14px;margin-bottom:6px;">Production Google OAuth 2.0 Credentials</h4>
+        <p style="font-size:12px;color:var(--neutral-500);margin-bottom:10px;">
+          Enter your Web Client ID from <a href="https://console.cloud.google.com/apis/credentials" target="_blank" style="color:var(--primary);">Google Cloud Console</a> to enable 1-click Google Sign-in on Vercel.
+        </p>
+        <form id="configForm">
+          <label>
+            Google OAuth Web Client ID
+            <input id="configGoogleClientId" placeholder="123456789-xxxxxx.apps.googleusercontent.com" />
+          </label>
+          <button class="secondary" type="submit" style="width:100%;margin-top:4px;">Save Credentials</button>
+        </form>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Application Bootstrap Engine -->
+  <script src="js/app.js"></script>
+</body>
+</html>
